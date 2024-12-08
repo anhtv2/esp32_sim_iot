@@ -121,9 +121,9 @@ namespace CommandProcessor
 };
 namespace Communicator
 {
-  const char *mqtt_server = "broker.mqtt-dashboard.com";
+  const char *mqtt_server = "broker.hivemq.com";
   const int mqtt_port = 1883;
-  const String general_topic = "iot/dhhn/";
+  const String general_topic = "iot/kstn2024_nhom3/";
   const String prefix_topic = general_topic + device_id + "/";
 
   const char *mqtt_user = "your_username";
