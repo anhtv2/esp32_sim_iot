@@ -31,6 +31,4 @@ public:
         // Đặt thời gian theo mili giây
         esp_timer_start_periodic(myTimer, miliseconds * 1000);
     };
-
-
 };

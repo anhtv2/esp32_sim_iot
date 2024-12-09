@@ -5,17 +5,24 @@
 #include <PubSubClient.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+using namespace std;
 
 #include "LED.h"
 #include "Timer.h"
 #include "Sensor.h"
 #include "LCD.h"
 #include "Door.h"
+#include "DataStorage.h"
+#include "Communicator.h"
+#include "SerialCommand.h"
+
 #define len(arr) (sizeof(arr) / sizeof(arr[0]))
 // put function declarations here:
-const String device_id = "325719";
+String house_id = "325719";
 bool unaccepted = true;
-LED led[2];
+LED led[10];
+LED motion_detection_led;
+int led_counter = 1;
 // LCD lcd;
 
 namespace CommandProcessor
@@ -98,122 +105,25 @@ namespace CommandProcessor
       if (!strcmp(cmd, "print"))
       {
         const char *message = doc["message"];
-          int row=0;
-          row = doc["row"];
-          int col =0;
-          col = doc["col"];
-          Serial.print("row: ");
-          Serial.println(row);
-          Serial.print("col: ");
-          Serial.println(col);
+        int row = 0;
+        row = doc["row"];
+        int col = 0;
+        col = doc["col"];
+        Serial.print("row: ");
+        Serial.println(row);
+        Serial.print("col: ");
+        Serial.println(col);
         Serial.println(String(message));
         lcd::print(String(message), row, col);
       }
       else if (!strcmp(cmd, "clear"))
       {
-        lcd::clear(); 
+        lcd::clear();
       }
       solved_id = id;
       return SUCCESS;
     }
     return WRONG;
-  }
-};
-namespace Communicator
-{
-  const char *mqtt_server = "broker.hivemq.com";
-  const int mqtt_port = 1883;
-  const String general_topic = "iot/kstn2024_nhom3/";
-  const String prefix_topic = general_topic + device_id + "/";
-
-  const char *mqtt_user = "your_username";
-  const char *mqtt_password = "your_password";
-  const char *client_id = "esp32_client";
-  PubSubClient client;
-  
- inline bool publish_data(String topic, String json_string);
-  void setup_communicator(PubSubClient &_client)
-  {
-    client = _client;
-    client.setServer(mqtt_server, mqtt_port);
-
-    auto callback = [](char *topic, byte *payload, unsigned int length)
-    {
-      Serial.println("length of message: " + String(length));
-      Serial.println("Message arrived in topic: " + String(topic));
-      // Process the message payload
-      Serial.print("Message: ");
-      char message[length];
-      message[length] = '\0';
-      for (int i = 0; i < length; i++)
-      {
-        message[i] = (char)payload[i];
-      }
-      Serial.println(message);
-      if(CommandProcessor::exec(message))
-        publish_data("command/result","success");
-      
-    };
-
-    client.setCallback(callback);
-  }
-  inline bool subscribe_command()
-  {
-    return client.subscribe((prefix_topic + "command").c_str());
-  }
-  inline void reconnect()
-  {
-    // Loop until we're reconnected
-    while (!client.connected())
-    {
-      Serial.print("Attempting MQTT connection...");
-      // Create a random client ID
-      String clientId = "esp32-client-";
-      clientId += String(random(0xffff), HEX);
-      // Attempt to connect
-      if (client.connect(clientId.c_str()))
-      {
-        Serial.println("connected to mqtt broker");
-        Serial.println("subscribe to command topic again");
-        subscribe_command();
-        // Once connected, publish an announcement...
-        // client.publish("outTopic", "hello world");
-      }
-      else
-      {
-        Serial.print("failed, rc=");
-        Serial.print(client.state());
-        Serial.println(" try again in 5 seconds");
-        // Wait 5 seconds before retrying
-        delay(5000);
-      }
-    }
-  }
-
-  inline bool publish_data(String topic, String json_string)
-  {
-    reconnect();
-    topic = prefix_topic + topic;
-    Serial.println("publishing data to topic : " + topic);
-    Serial.println("Data content : " + json_string);
-    // debug
-    client.publish(topic.c_str(), json_string.c_str());
-    Serial.println("finish sending data to broker");
-
-    return true;
-  }
-
-  inline void init_topic()
-  {
-    reconnect();
-    Serial.println("init topic for device");
-    client.publish((general_topic + "init").c_str(), device_id.c_str());
-    Serial.println("finish sending request to broker");
-  }
-
-  inline void remain()
-  {
-    client.loop();
   }
 };
 
@@ -225,8 +135,7 @@ int motion_detected = 0;
 
 inline void setup_wifi()
 {
-  led[0].set_pin(32);
-  led[1].set_pin(33);
+
   delay(10);
   // We start by connecting to a WiFi network
   Serial.println();
@@ -265,9 +174,41 @@ inline void send_data()
   comm::publish_data("sensor_data", json_string.c_str());
 }
 
+const char *house_id_key = "house_id";
+const char *led_counter_key = "led_counter";
+const char *led_index_key = "led_";
+
+void setup_data()
+{
+  // DataStorage::set_string_value("house_id", "325719");
+  if (DataStorage::has_value(house_id_key))
+  {
+    house_id = DataStorage::get_string_value(house_id_key, "");
+    
+  }
+  if (DataStorage::has_value(led_counter_key))
+  {
+    led_counter = DataStorage::get_int_value(led_counter_key, 1);
+
+    for (int i = 1; i < led_counter; i++)
+    {
+      led[i].set_pin(DataStorage::get_int_value((led_index_key + String(i)).c_str(), 0));
+    }
+  }
+}
 void setup()
 {
-  led[1].turn_off();
+  Serial.begin(115200);
+  setup_data();
+
+  // setup for Communicator
+
+  led[0].set_pin(32);
+  DataStorage::set_int_value((led_index_key + String(0)).c_str(), 32);
+
+  motion_detection_led.set_pin(33);
+  motion_detection_led.turn_off();
+
   door::setup(18);
   door::change_angle(0);
   lcd::setup();
@@ -275,19 +216,18 @@ void setup()
   sensor::setup_pir(23, []()
                     {
                       if(sensor::check_motion()){
-                        Serial.println("motion deteced");
-                        led[1].turn_on();
+                        Serial.println("motion detected");
+                        motion_detection_led.turn_on();
                         motion_detected = 1;
                       }
                       else{
-                        led[1].turn_off();
+                        motion_detection_led.turn_off();
                         motion_detected = 0;
                       } });
 
   using namespace CommandProcessor;
-  Serial.begin(115200);
   setup_wifi();
-  comm::setup_communicator(client);
+  comm::setup_communicator(client, house_id, &CommandProcessor::exec);
 
   comm::reconnect();
   // comm.subscribe_command();
@@ -299,8 +239,74 @@ void setup()
                            { send_data(); });
 }
 unsigned long prev_millis = 0;
+
+void exec_serial_command(const vector<String> &words)
+{
+  if (words[0] == "set")
+  {
+    if (words.size() < 3)
+      return;
+    if (words[1] == "house_id")
+    {
+      house_id = words[2];
+      Serial.println("house id is changed to " + house_id);
+      DataStorage::set_string_value(house_id_key, house_id);
+      Communicator::set_house_id(house_id);
+      return;
+    }
+  }
+  if (words[0] == "add")
+  {
+    if (words.size() < 3)
+      return;
+    if (words[1] == "led")
+    {
+      if (led_counter >= len(led))
+      {
+        return;
+      }
+      int pin = words[2].toInt();
+      led[led_counter].set_pin(pin);
+      DataStorage::set_int_value((led_index_key + String(led_counter)).c_str(), pin);
+      DataStorage::set_int_value(led_counter_key, ++led_counter);
+
+      return;
+    }
+  }
+  if (words[0] == "check")
+  {
+    if (words.size() < 2)
+      return;
+    if (words[1] == "house_id")
+    {
+      if (!DataStorage::has_value(house_id_key))
+      {
+        Serial.println("house id hasn't been config yet");
+      }
+      Serial.println("id of house is :" + DataStorage::get_string_value("house_id", ""));
+      return;
+    }
+    if (words[1] == "led")
+    {
+      for (int i = 0; i < DataStorage::get_int_value(led_counter_key, 1); i++)
+      {
+        Serial.println("led " + String(i) + " is on pin " + String(DataStorage::get_int_value((led_index_key + String(i)).c_str(), 0)));
+      }
+    }
+  }
+}
 void loop()
 {
+  if (Serial.available())
+  {
+    vector<String> serial_command = SerialCommand::read_and_split();
+    exec_serial_command(serial_command);
+    for (auto a : serial_command)
+    {
+      Serial.println(a);
+    }
+  }
+
   // if (unaccepted)
   // {
   //   unsigned long cur_millis = millis();
@@ -322,11 +328,11 @@ void loop()
     const size_t capacity = JSON_OBJECT_SIZE(3);
     DynamicJsonDocument doc(capacity);
 
-  // Add data to the JSON document
+    // Add data to the JSON document
     doc["motion"] = 1;
     String json_string;
     serializeJson(doc, json_string);
-    comm::publish_data("sensor_data",json_string );
+    comm::publish_data("sensor_data", json_string);
   }
   else if (motion_detected == 0)
   {

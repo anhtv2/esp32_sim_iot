@@ -18,7 +18,8 @@ namespace lcd
         my_lcd.setCursor(col, row);
         my_lcd.print(message);
     }
-    inline void clear(){
+    inline void clear()
+    {
         return my_lcd.clear();
     }
 };
