@@ -20,9 +20,8 @@ namespace sensor
     {
         return dht.getHumidity();
     }
-    inline bool check_motion()
-    {
-        return digitalRead(pir_pin);
+    inline bool check_motion(){
+        return digitalRead(pir_pin) ;
     }
 
     inline void setup_pir(int _pin, void (*func)() = nullptr)
